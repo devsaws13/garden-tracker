@@ -69,20 +69,43 @@ with st.expander("Log New Treatment", expanded=True):
 # 2. Upcoming Schedule & History
 st.subheader("Upcoming Schedule")
 
-# Fetch data
+# Fetch data sorted by next due date
 result = client.execute("SELECT * FROM treatments ORDER BY next_due_date ASC")
 
 if result.rows:
     # Convert Turso rows to a Pandas DataFrame for Streamlit display
     df = pd.DataFrame(result.rows, columns=["ID", "Plant", "Treatment", "Applied On", "Next Due", "Notes"])
     
-    # Highlight overdue or upcoming treatments
+    # Convert 'Next Due' to actual date objects
     df['Next Due'] = pd.to_datetime(df['Next Due']).dt.date
+    
+    # Explicitly sort by 'Next Due' ascending as the default view
+    df = df.sort_values(by="Next Due", ascending=True)
+    
     today = date.today()
     
-    # Display as a clean dataframe without the ID column
+    # Define a styling function to color rows
+    def highlight_dates(row):
+        due_date = row['Next Due']
+        
+        # Overdue (Date has passed): Light Orange
+        if due_date < today:
+            return ['background-color: #FFD8A8; color: black'] * len(row)
+        
+        # Due Soon (Within 3 days including today): Light Pink
+        elif today <= due_date <= today + timedelta(days=3):
+            return ['background-color: #FFD1DC; color: black'] * len(row)
+            
+        # Default row formatting
+        else:
+            return [''] * len(row)
+            
+    # Drop the ID column and apply the coloring logic
+    styled_df = df.drop(columns=["ID"]).style.apply(highlight_dates, axis=1)
+    
+    # Display the styled dataframe
     st.dataframe(
-        df.drop(columns=["ID"]), 
+        styled_df, 
         use_container_width=True,
         hide_index=True
     )
