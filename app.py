@@ -46,7 +46,7 @@ with st.expander("Log New Treatment", expanded=True):
     with col2:
         treatment = st.selectbox(
             "Treatment Type", 
-            ["Neem Oil", "Vermi Compost Tea", "Cow dung tea", "Kitchen compost tea", "Moringa tea", "Saptadhanya tea", "Normal watering"]
+            ["Neem Oil", "Vermi Compost Tea", "Cow dung tea", "Kitchen compost tea", "Moringa tea", "Saptadhanya tea","banana tea", "onion tea",  "Normal watering"]
         )
         notes = st.text_input("Notes (e.g., dilution ratio, curing state)")
 
