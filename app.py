@@ -113,10 +113,20 @@ with tab1:
         
         def highlight_dates(row):
             due_date = row['Next Due']
+            
+            # 1. Safely ignore empty/new rows to prevent styling errors
+            if pd.isna(due_date):
+                return [''] * len(row)
+                
+            # 2. Overdue (Date has passed): Light Orange
             if due_date < today:
                 return ['background-color: #FFD8A8; color: black'] * len(row)
+                
+            # 3. Due Soon (Within 3 days including today): Light Pink
             elif today <= due_date <= today + timedelta(days=3):
                 return ['background-color: #FFD1DC; color: black'] * len(row)
+                
+            # 4. Default row formatting
             else:
                 return [''] * len(row)
         
