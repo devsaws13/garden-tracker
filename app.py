@@ -36,9 +36,10 @@ client.execute("""
 plant_cols = [col[1] for col in client.execute("PRAGMA table_info(custom_plants)").rows]
 if "category" not in plant_cols:
     client.execute("ALTER TABLE custom_plants ADD COLUMN category TEXT DEFAULT '🌸 Flowering'")
-    # Fix existing leafy plants
-    leafy = "('Lemongrass', 'Pudina', 'Tulasi', 'Ajwain'')"
+    leafy = "('Lemongrass', 'Pudina', 'Tulasi', 'Ajwain')"
     client.execute(f"UPDATE custom_plants SET category = '🌿 Leafy' WHERE name IN {leafy}")
+
+client.execute("UPDATE custom_plants SET category = '🌸 Flowering' WHERE name = 'Mulabery'")
 
 client.execute("""
     CREATE TABLE IF NOT EXISTS custom_treatments (
@@ -64,9 +65,19 @@ if treatment_count == 0:
     for t in default_treatments:
         client.execute("INSERT OR IGNORE INTO custom_treatments (name) VALUES (?)", [t])
 
-# Fetch dynamic lists
-db_plants = [row[0] for row in client.execute("SELECT name FROM custom_plants ORDER BY name ASC").rows]
+# --- NEW EMOJI MAPPING LOGIC ---
+# Fetch dynamic lists and extract the emoji to create a display name
+plants_data = client.execute("SELECT name, category FROM custom_plants ORDER BY name ASC").rows
+
+# 1. Create a display mapping: {"Hibiscus": "🌸 Hibiscus"}
+plant_display_map = {row[0]: f"{str(row[1])[0]} {row[0]}" for row in plants_data}
+# 2. Create a reverse mapping for saving to DB: {"🌸 Hibiscus": "Hibiscus"}
+plant_value_map = {v: k for k, v in plant_display_map.items()}
+
+# Extract the values into a list for the dropdown menus
+db_plants_display = list(plant_display_map.values())
 db_treatments = [row[0] for row in client.execute("SELECT name FROM custom_treatments ORDER BY name ASC").rows]
+# -------------------------------
 
 st.title("🌿 Garden Treatment Tracker")
 
@@ -77,8 +88,8 @@ with st.expander("Log New Treatment", expanded=True):
     with col1:
         plants = st.multiselect(
             "Select Plant(s)", 
-            db_plants,
-            default=[db_plants[0]] if db_plants else None
+            db_plants_display, # Now uses the emoji list
+            default=[db_plants_display[0]] if db_plants_display else None
         )
         applied_on = st.date_input("Applied Date", value=date.today())
         interval_days = st.number_input("Repeat every (days)", min_value=1, value=14)
@@ -95,10 +106,13 @@ with st.expander("Log New Treatment", expanded=True):
             st.error("Please select at least one plant.")
         else:
             next_due = applied_on + timedelta(days=interval_days)
-            for plant in plants:
+            for display_plant in plants:
+                # Convert "🌸 Hibiscus" back to "Hibiscus" before saving
+                actual_plant = plant_value_map[display_plant] 
+                
                 client.execute(
                     "INSERT INTO treatments (plant_name, treatment, applied_date, next_due_date, notes) VALUES (?, ?, ?, ?, ?)",
-                    [plant, treatment, str(applied_on), str(next_due), notes]
+                    [actual_plant, treatment, str(applied_on), str(next_due), notes]
                 )
             st.success(f"Logged treatments for {len(plants)} plant(s)! Next application due: {next_due.strftime('%b %d, %Y')}")
             st.rerun()
@@ -111,7 +125,6 @@ tab1, tab2 = st.tabs(["📅 Upcoming Schedule", "⚙️ Edit Settings & Options"
 with tab1:
     st.subheader("Schedule & History")
     
-    # Fetch data joined with the new category
     result = client.execute("""
         SELECT t.id, t.plant_name, p.category, t.treatment, t.applied_date, t.next_due_date, t.notes 
         FROM treatments t 
@@ -122,6 +135,10 @@ with tab1:
     if result.rows:
         df = pd.DataFrame(result.rows, columns=["ID", "Plant", "Type", "Treatment", "Applied On", "Next Due", "Notes"])
         
+        # Format the Plant column to include the emoji, then drop the Type column so it's clean
+        df['Plant'] = df.apply(lambda r: f"{str(r['Type'])[0]} {r['Plant']}" if pd.notna(r['Type']) and r['Type'] else r['Plant'], axis=1)
+        df = df.drop(columns=["Type"])
+        
         # Convert date strings to actual date objects
         df['Applied On'] = pd.to_datetime(df['Applied On']).dt.date
         df['Next Due'] = pd.to_datetime(df['Next Due']).dt.date
@@ -131,45 +148,22 @@ with tab1:
         
         def highlight_dates(row):
             due_date = row['Next Due']
-            
-            # 1. Safely ignore empty/new rows to prevent styling errors
-            if pd.isna(due_date):
-                return [''] * len(row)
-                
-            # 2. Overdue / Past Due (Date has passed): Light Pink
-            if due_date < today:
-                return ['background-color: #FFD1DC; color: black'] * len(row)
-                
-            # 3. Next Due (Within 3 days including today): Light Yellow
-            elif today <= due_date <= today + timedelta(days=3):
-                return ['background-color: #FFFFE0; color: black'] * len(row)
-                
-            # 4. Default row formatting (future dates beyond 3 days)
-            else:
-                return [''] * len(row)
+            if pd.isna(due_date): return [''] * len(row)
+            if due_date < today: return ['background-color: #FFD1DC; color: black'] * len(row)
+            elif today <= due_date <= today + timedelta(days=3): return ['background-color: #FFFFE0; color: black'] * len(row)
+            else: return [''] * len(row)
         
-        # Apply the styles to a separate variable
         styled_df = df.style.apply(highlight_dates, axis=1)
-
-        # Toggle switch for Edit Mode
         edit_mode = st.toggle("✏️ Enable Edit Mode")
 
         if not edit_mode:
-            # VIEW MODE: Uses st.dataframe for perfect color rendering
-            st.dataframe(
-                styled_df,
-                column_config={"ID": None}, # Hides the ID column securely
-                use_container_width=True,
-                hide_index=True
-            )
+            st.dataframe(styled_df, column_config={"ID": None}, use_container_width=True, hide_index=True)
         else:
-            # EDIT MODE: Uses st.data_editor without colors to prevent the flashing bug
             edited_df = st.data_editor(
                 df, 
                 column_config={
                     "ID": None, 
-                    "Plant": st.column_config.SelectboxColumn(options=db_plants),
-                    "Type": st.column_config.TextColumn(disabled=True), # Read-only emoji category
+                    "Plant": st.column_config.SelectboxColumn(options=db_plants_display),
                     "Treatment": st.column_config.SelectboxColumn(options=db_treatments)
                 },
                 use_container_width=True,
@@ -182,26 +176,25 @@ with tab1:
                 original_ids = set(df['ID'].dropna().tolist())
                 current_ids = set(edited_df['ID'].dropna().tolist())
                 
-                # Find and delete rows removed in the editor
                 deleted_ids = original_ids - current_ids
                 for del_id in deleted_ids:
                     client.execute("DELETE FROM treatments WHERE id = ?", [del_id])
                     
-                # Update existing rows or insert newly typed rows
                 for _, row in edited_df.iterrows():
                     row_id = row['ID']
-                    p_name = row['Plant']
+                    p_display = row['Plant']
+                    p_name = plant_value_map.get(p_display, p_display) # Strip emoji before saving edit
                     t_name = row['Treatment']
                     a_date = str(row['Applied On'])
                     n_date = str(row['Next Due'])
                     nts = str(row['Notes']) if pd.notna(row['Notes']) else ""
                     
-                    if pd.isna(row_id): # New row added via UI
+                    if pd.isna(row_id):
                         client.execute(
                             "INSERT INTO treatments (plant_name, treatment, applied_date, next_due_date, notes) VALUES (?, ?, ?, ?, ?)",
                             [p_name, t_name, a_date, n_date, nts]
                         )
-                    else: # Existing row updated
+                    else:
                         client.execute(
                             "UPDATE treatments SET plant_name=?, treatment=?, applied_date=?, next_due_date=?, notes=? WHERE id=?",
                             [p_name, t_name, a_date, n_date, nts, int(row_id)]
@@ -226,9 +219,10 @@ with tab2:
                 client.execute("INSERT OR IGNORE INTO custom_plants (name, category) VALUES (?, ?)", [new_plant, new_plant_cat])
                 st.rerun()
                 
-        plant_to_delete = st.selectbox("Remove Plant", db_plants)
+        plant_to_delete_display = st.selectbox("Remove Plant", db_plants_display)
         if st.button("Delete Plant"):
-            client.execute("DELETE FROM custom_plants WHERE name = ?", [plant_to_delete])
+            actual_plant_to_delete = plant_value_map.get(plant_to_delete_display)
+            client.execute("DELETE FROM custom_plants WHERE name = ?", [actual_plant_to_delete])
             st.rerun()
             
     with colB:
