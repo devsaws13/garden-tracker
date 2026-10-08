@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import libsql_client
 from datetime import date, timedelta
+import re
 
 st.set_page_config(page_title="Garden Tracker", layout="centered")
 
@@ -14,7 +15,7 @@ def get_db():
 
 client = get_db()
 
-# Setup Tables (Runs once)
+# Setup Tables
 client.execute("""
     CREATE TABLE IF NOT EXISTS treatments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,40 +48,34 @@ client.execute("""
     )
 """)
 
-# Seed default data if empty
-plant_count = client.execute("SELECT COUNT(*) as count FROM custom_plants").rows[0][0]
-if plant_count == 0:
-    default_plants = {
-        "Hibiscus": "🌸 Flowering", "Raat ki Rani": "🌸 Flowering", "Parijat": "🌸 Flowering", 
-        "Mogra": "🌸 Flowering", "Champa": "🌸 Flowering", "Lemongrass": "🌿 Leafy", 
-        "Pudina": "🌿 Leafy", "Dwarf Kamini": "🌸 Flowering", "Rajnigandha": "🌸 Flowering", 
-        "Tulasi": "🌿 Leafy", "Ajwain": "🌿 Leafy", "Chameli": "🌸 Flowering", "Mulabery": "🌸 Flowering"
-    }
-    for p, cat in default_plants.items():
-        client.execute("INSERT OR IGNORE INTO custom_plants (name, category) VALUES (?, ?)", [p, cat])
+# --- NEW BULLETPROOF MAPPING LOGIC ---
+# Helper to strip emojis from messy database entries
+def clean_text(text):
+    if not text: return ""
+    return re.sub(r'[^\x00-\x7F]+', '', str(text)).strip()
 
-treatment_count = client.execute("SELECT COUNT(*) as count FROM custom_treatments").rows[0][0]
-if treatment_count == 0:
-    default_treatments = ["Neem Oil", "Vermi Compost Tea", "Cow dung tea", "Veg/Fruit Peel Compost Tea", "Moringa tea", "Saptadhanya tea", "banana tea", "onion tea", "Normal watering"]
-    for t in default_treatments:
-        client.execute("INSERT OR IGNORE INTO custom_treatments (name) VALUES (?)", [t])
-
-# --- BULLETPROOF EMOJI MAPPING LOGIC ---
 plants_data = client.execute("SELECT name, category FROM custom_plants ORDER BY name ASC").rows
-plant_display_map = {row[0]: f"{str(row[1])[0]} {row[0]}" for row in plants_data}
-plant_value_map = {v: k for k, v in plant_display_map.items()}
-db_plants_display = list(plant_display_map.values())
-db_treatments = [row[0] for row in client.execute("SELECT name FROM custom_treatments ORDER BY name ASC").rows]
 
-# Smart mapping function to handle old raw names AND old emoji names
+# Build maps using strictly cleaned names as the keys
+plant_display_map = {}
+for row in plants_data:
+    clean_name = clean_text(row[0])
+    emoji = str(row[1])[0] if row[1] else "🌸"
+    plant_display_map[clean_name] = f"{emoji} {clean_name}"
+
+# Reverse map for saving
+plant_value_map = {v: k for k, v in plant_display_map.items()}
+
+# Dropdown lists
+db_plants_display = sorted(list(plant_display_map.values()))
+db_treatments = sorted([clean_text(row[0]) for row in client.execute("SELECT name FROM custom_treatments").rows])
+
+# Smart mapping function for the dataframe
 def safe_map_plant(plant_name):
-    if not plant_name:
-        return ""
-    if plant_name in plant_display_map.values(): # Already has emoji
-        return plant_name
-    if plant_name in plant_display_map: # Needs emoji added
-        return plant_display_map[plant_name]
-    return plant_name # Fallback
+    clean_name = clean_text(plant_name)
+    return plant_display_map.get(clean_name, clean_name)
+
+# --------------------------------------
 
 st.title("🌿 Garden Treatment Tracker")
 
@@ -123,13 +118,12 @@ tab1, tab2 = st.tabs(["📅 Upcoming Schedule", "⚙️ Edit Settings & Options"
 with tab1:
     st.subheader("Schedule & History")
     
-    # Query treatments table normally without a risky JOIN
     result = client.execute("SELECT id, plant_name as Plant, treatment as Treatment, applied_date as 'Applied On', next_due_date as 'Next Due', notes as Notes FROM treatments ORDER BY next_due_date ASC")
     
     if result.rows:
         df = pd.DataFrame(result.rows, columns=["ID", "Plant", "Treatment", "Applied On", "Next Due", "Notes"])
         
-        # Apply the smart mapping function directly to the column
+        # Apply the smart mapping function
         df['Plant'] = df['Plant'].apply(safe_map_plant)
         
         df['Applied On'] = pd.to_datetime(df['Applied On']).dt.date
@@ -208,7 +202,9 @@ with tab2:
         
         if st.button("Add Plant"):
             if new_plant:
-                client.execute("INSERT OR IGNORE INTO custom_plants (name, category) VALUES (?, ?)", [new_plant, new_plant_cat])
+                # Clean the input before saving to ensure consistency
+                clean_new_plant = clean_text(new_plant)
+                client.execute("INSERT OR IGNORE INTO custom_plants (name, category) VALUES (?, ?)", [clean_new_plant, new_plant_cat])
                 st.rerun()
                 
         plant_to_delete_display = st.selectbox("Remove Plant", db_plants_display)
@@ -223,7 +219,8 @@ with tab2:
         
         if st.button("Add Treatment"):
             if new_treatment:
-                client.execute("INSERT OR IGNORE INTO custom_treatments (name) VALUES (?)", [new_treatment])
+                clean_new_treatment = clean_text(new_treatment)
+                client.execute("INSERT OR IGNORE INTO custom_treatments (name) VALUES (?)", [clean_new_treatment])
                 st.rerun()
                 
         treatment_to_delete = st.selectbox("Remove Treatment", db_treatments)
