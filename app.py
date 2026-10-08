@@ -34,9 +34,11 @@ with st.expander("Log New Treatment", expanded=True):
     col1, col2 = st.columns(2)
     
     with col1:
-        plant = st.selectbox(
-            "Select Plant", 
-            ["Hibiscus", "Raat ki Rani", "Parijat", "Mogra", "Champa", "Lemongrass", "Pudina", "Dwarf Kamini","Rajnigandha","Tulasi","Ajwain","Chameli", "Juhi", "Mulabery"]
+        # Changed to multiselect to allow multiple plants
+        plants = st.multiselect(
+            "Select Plant(s)", 
+            ["Hibiscus", "Raat ki Rani", "Parijat", "Mogra", "Champa", "Lemongrass", "Pudina", "Dwarf Kamini","Rajnigandha","Tulasi","Ajwain","Chameli", "Juhi", "Mulabery"],
+            default=["Hibiscus"] # Optional: Set a default selection
         )
         applied_on = st.date_input("Applied Date", value=date.today())
         interval_days = st.number_input("Repeat every (days)", min_value=1, value=14)
@@ -49,16 +51,20 @@ with st.expander("Log New Treatment", expanded=True):
         notes = st.text_input("Notes (e.g., dilution ratio, curing state)")
 
     if st.button("Save Entry", use_container_width=True):
-        next_due = applied_on + timedelta(days=interval_days)
-        
-        client.execute(
-            "INSERT INTO treatments (plant_name, treatment, applied_date, next_due_date, notes) VALUES (?, ?, ?, ?, ?)",
-            [plant, treatment, str(applied_on), str(next_due), notes]
-        )
-        st.success(f"Logged! Next application due: {next_due.strftime('%b %d, %Y')}")
-        st.rerun()
-
-st.divider()
+        if not plants:
+            st.error("Please select at least one plant.")
+        else:
+            next_due = applied_on + timedelta(days=interval_days)
+            
+            # Loop through each selected plant and insert a row
+            for plant in plants:
+                client.execute(
+                    "INSERT INTO treatments (plant_name, treatment, applied_date, next_due_date, notes) VALUES (?, ?, ?, ?, ?)",
+                    [plant, treatment, str(applied_on), str(next_due), notes]
+                )
+            
+            st.success(f"Logged treatments for {len(plants)} plant(s)! Next application due: {next_due.strftime('%b %d, %Y')}")
+            st.rerun()
 
 # 2. Upcoming Schedule & History
 st.subheader("Upcoming Schedule")
