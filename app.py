@@ -32,6 +32,14 @@ client.execute("""
     )
 """)
 
+# Check for category column and upgrade table if missing
+plant_cols = [col[1] for col in client.execute("PRAGMA table_info(custom_plants)").rows]
+if "category" not in plant_cols:
+    client.execute("ALTER TABLE custom_plants ADD COLUMN category TEXT DEFAULT '🌸 Flowering'")
+    # Fix existing leafy plants
+    leafy = "('Lemongrass', 'Pudina', 'Tulasi', 'Ajwain', 'Mulabery')"
+    client.execute(f"UPDATE custom_plants SET category = '🌿 Leafy' WHERE name IN {leafy}")
+
 client.execute("""
     CREATE TABLE IF NOT EXISTS custom_treatments (
         name TEXT PRIMARY KEY
@@ -41,9 +49,14 @@ client.execute("""
 # Seed default data if empty
 plant_count = client.execute("SELECT COUNT(*) as count FROM custom_plants").rows[0][0]
 if plant_count == 0:
-    default_plants = ["Hibiscus", "Raat ki Rani", "Parijat", "Mogra", "Champa", "Lemongrass", "Pudina", "Dwarf Kamini", "Rajnigandha", "Tulasi", "Ajwain", "Chameli", "Mulabery"]
-    for p in default_plants:
-        client.execute("INSERT OR IGNORE INTO custom_plants (name) VALUES (?)", [p])
+    default_plants = {
+        "Hibiscus": "🌸 Flowering", "Raat ki Rani": "🌸 Flowering", "Parijat": "🌸 Flowering", 
+        "Mogra": "🌸 Flowering", "Champa": "🌸 Flowering", "Lemongrass": "🌿 Leafy", 
+        "Pudina": "🌿 Leafy", "Dwarf Kamini": "🌸 Flowering", "Rajnigandha": "🌸 Flowering", 
+        "Tulasi": "🌿 Leafy", "Ajwain": "🌿 Leafy", "Chameli": "🌸 Flowering", "Mulabery": "🌿 Leafy"
+    }
+    for p, cat in default_plants.items():
+        client.execute("INSERT OR IGNORE INTO custom_plants (name, category) VALUES (?, ?)", [p, cat])
 
 treatment_count = client.execute("SELECT COUNT(*) as count FROM custom_treatments").rows[0][0]
 if treatment_count == 0:
@@ -98,11 +111,16 @@ tab1, tab2 = st.tabs(["📅 Upcoming Schedule", "⚙️ Edit Settings & Options"
 with tab1:
     st.subheader("Schedule & History")
     
-    # Fetch data
-    result = client.execute("SELECT id, plant_name, treatment, applied_date, next_due_date, notes FROM treatments ORDER BY next_due_date ASC")
+    # Fetch data joined with the new category
+    result = client.execute("""
+        SELECT t.id, t.plant_name, p.category, t.treatment, t.applied_date, t.next_due_date, t.notes 
+        FROM treatments t 
+        LEFT JOIN custom_plants p ON t.plant_name = p.name 
+        ORDER BY t.next_due_date ASC
+    """)
     
     if result.rows:
-        df = pd.DataFrame(result.rows, columns=["ID", "Plant", "Treatment", "Applied On", "Next Due", "Notes"])
+        df = pd.DataFrame(result.rows, columns=["ID", "Plant", "Type", "Treatment", "Applied On", "Next Due", "Notes"])
         
         # Convert date strings to actual date objects
         df['Applied On'] = pd.to_datetime(df['Applied On']).dt.date
@@ -151,6 +169,7 @@ with tab1:
                 column_config={
                     "ID": None, 
                     "Plant": st.column_config.SelectboxColumn(options=db_plants),
+                    "Type": st.column_config.TextColumn(disabled=True), # Read-only emoji category
                     "Treatment": st.column_config.SelectboxColumn(options=db_treatments)
                 },
                 use_container_width=True,
@@ -200,9 +219,11 @@ with tab2:
     with colA:
         st.write("**🌿 Plants**")
         new_plant = st.text_input("Add New Plant")
+        new_plant_cat = st.selectbox("Category", ["🌸 Flowering", "🌿 Leafy", "🌳 Tree / Fruiting"])
+        
         if st.button("Add Plant"):
             if new_plant:
-                client.execute("INSERT OR IGNORE INTO custom_plants (name) VALUES (?)", [new_plant])
+                client.execute("INSERT OR IGNORE INTO custom_plants (name, category) VALUES (?, ?)", [new_plant, new_plant_cat])
                 st.rerun()
                 
         plant_to_delete = st.selectbox("Remove Plant", db_plants)
