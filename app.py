@@ -125,14 +125,24 @@ tab1, tab2 = st.tabs(["📅 Upcoming Schedule", "⚙️ Edit Settings & Options"
 with tab1:
     st.subheader("Schedule & History")
     
-    # Fetch data strictly from the treatments table
-    result = client.execute("SELECT id, plant_name, treatment, applied_date, next_due_date, notes FROM treatments ORDER BY next_due_date ASC")
+    # Use SQL to join the tables and concatenate the emoji directly in the query result
+    # We take the first character of the category (the emoji) and concatenate it with the plant name
+    query = """
+        SELECT 
+            t.id, 
+            substr(p.category, 1, 1) || ' ' || t.plant_name as formatted_plant, 
+            t.treatment, 
+            t.applied_date, 
+            t.next_due_date, 
+            t.notes 
+        FROM treatments t
+        LEFT JOIN custom_plants p ON t.plant_name = p.name
+        ORDER BY t.next_due_date ASC
+    """
+    result = client.execute(query)
     
     if result.rows:
         df = pd.DataFrame(result.rows, columns=["ID", "Plant", "Treatment", "Applied On", "Next Due", "Notes"])
-        
-        # MAP EMOJIS: Convert "Mogra" to "🌸 Mogra" for display
-        df['Plant'] = df['Plant'].map(plant_display_map).fillna(df['Plant'])
         
         # Convert date strings to actual date objects
         df['Applied On'] = pd.to_datetime(df['Applied On']).dt.date
@@ -170,7 +180,6 @@ with tab1:
                 df, 
                 column_config={
                     "ID": None, 
-                    # Use the emoji list for the editor dropdown to prevent blank columns
                     "Plant": st.column_config.SelectboxColumn(options=db_plants_display),
                     "Treatment": st.column_config.SelectboxColumn(options=db_treatments)
                 },
