@@ -37,7 +37,7 @@ plant_cols = [col[1] for col in client.execute("PRAGMA table_info(custom_plants)
 if "category" not in plant_cols:
     client.execute("ALTER TABLE custom_plants ADD COLUMN category TEXT DEFAULT '🌸 Flowering'")
     # Fix existing leafy plants
-    leafy = "('Lemongrass', 'Pudina', 'Tulasi', 'Ajwain', 'Mulabery')"
+    leafy = "('Lemongrass', 'Pudina', 'Tulasi', 'Ajwain'')"
     client.execute(f"UPDATE custom_plants SET category = '🌿 Leafy' WHERE name IN {leafy}")
 
 client.execute("""
@@ -53,7 +53,7 @@ if plant_count == 0:
         "Hibiscus": "🌸 Flowering", "Raat ki Rani": "🌸 Flowering", "Parijat": "🌸 Flowering", 
         "Mogra": "🌸 Flowering", "Champa": "🌸 Flowering", "Lemongrass": "🌿 Leafy", 
         "Pudina": "🌿 Leafy", "Dwarf Kamini": "🌸 Flowering", "Rajnigandha": "🌸 Flowering", 
-        "Tulasi": "🌿 Leafy", "Ajwain": "🌿 Leafy", "Chameli": "🌸 Flowering", "Mulabery": "🌿 Leafy"
+        "Tulasi": "🌿 Leafy", "Ajwain": "🌿 Leafy", "Chameli": "🌸 Flowering", "Mulabery": "🌸 Flowering"
     }
     for p, cat in default_plants.items():
         client.execute("INSERT OR IGNORE INTO custom_plants (name, category) VALUES (?, ?)", [p, cat])
