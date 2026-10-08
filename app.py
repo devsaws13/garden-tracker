@@ -220,4 +220,13 @@ with tab2:
     with colB:
         st.write("**🧪 Treatments**")
         new_treatment = st.text_input("Add New Treatment")
+        
         if st.button("Add Treatment"):
+            if new_treatment:
+                client.execute("INSERT OR IGNORE INTO custom_treatments (name) VALUES (?)", [new_treatment])
+                st.rerun()
+                
+        treatment_to_delete = st.selectbox("Remove Treatment", db_treatments)
+        if st.button("Delete Treatment"):
+            client.execute("DELETE FROM custom_treatments WHERE name = ?", [treatment_to_delete])
+            st.rerun()
