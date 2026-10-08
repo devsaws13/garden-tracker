@@ -114,67 +114,75 @@ with tab1:
         def highlight_dates(row):
             due_date = row['Next Due']
             
-            # 1. Safely ignore empty/new rows to prevent styling errors
             if pd.isna(due_date):
                 return [''] * len(row)
-                
-            # 2. Overdue (Date has passed): Light Orange
             if due_date < today:
                 return ['background-color: #FFD8A8; color: black'] * len(row)
-                
-            # 3. Due Soon (Within 3 days including today): Light Pink
             elif today <= due_date <= today + timedelta(days=3):
                 return ['background-color: #FFD1DC; color: black'] * len(row)
-                
-            # 4. Default row formatting
             else:
                 return [''] * len(row)
         
-        # Display editable dataframe (ID is hidden but kept for database sync)
-        edited_df = st.data_editor(
-            df.style.apply(highlight_dates, axis=1),
-            column_config={
-                "ID": None, 
-                "Plant": st.column_config.SelectboxColumn(options=db_plants),
-                "Treatment": st.column_config.SelectboxColumn(options=db_treatments)
-            },
-            use_container_width=True,
-            hide_index=True,
-            num_rows="dynamic",
-            key="log_editor"
-        )
-        
-        if st.button("Save Table Changes", type="primary"):
-            original_ids = set(df['ID'].dropna().tolist())
-            current_ids = set(edited_df['ID'].dropna().tolist())
+        # Apply the styles to a separate variable
+        styled_df = df.style.apply(highlight_dates, axis=1)
+
+        # Toggle switch for Edit Mode
+        edit_mode = st.toggle("✏️ Enable Edit Mode")
+
+        if not edit_mode:
+            # VIEW MODE: Uses st.dataframe for perfect color rendering
+            st.dataframe(
+                styled_df,
+                column_config={"ID": None}, # Hides the ID column securely
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            # EDIT MODE: Uses st.data_editor without colors to prevent the flashing bug
+            edited_df = st.data_editor(
+                df, 
+                column_config={
+                    "ID": None, 
+                    "Plant": st.column_config.SelectboxColumn(options=db_plants),
+                    "Treatment": st.column_config.SelectboxColumn(options=db_treatments)
+                },
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key="log_editor"
+            )
             
-            # Find and delete rows removed in the editor
-            deleted_ids = original_ids - current_ids
-            for del_id in deleted_ids:
-                client.execute("DELETE FROM treatments WHERE id = ?", [del_id])
+            if st.button("Save Table Changes", type="primary"):
+                original_ids = set(df['ID'].dropna().tolist())
+                current_ids = set(edited_df['ID'].dropna().tolist())
                 
-            # Update existing rows or insert newly typed rows
-            for _, row in edited_df.iterrows():
-                row_id = row['ID']
-                p_name = row['Plant']
-                t_name = row['Treatment']
-                a_date = str(row['Applied On'])
-                n_date = str(row['Next Due'])
-                nts = str(row['Notes']) if pd.notna(row['Notes']) else ""
+                # Find and delete rows removed in the editor
+                deleted_ids = original_ids - current_ids
+                for del_id in deleted_ids:
+                    client.execute("DELETE FROM treatments WHERE id = ?", [del_id])
+                    
+                # Update existing rows or insert newly typed rows
+                for _, row in edited_df.iterrows():
+                    row_id = row['ID']
+                    p_name = row['Plant']
+                    t_name = row['Treatment']
+                    a_date = str(row['Applied On'])
+                    n_date = str(row['Next Due'])
+                    nts = str(row['Notes']) if pd.notna(row['Notes']) else ""
+                    
+                    if pd.isna(row_id): # New row added via UI
+                        client.execute(
+                            "INSERT INTO treatments (plant_name, treatment, applied_date, next_due_date, notes) VALUES (?, ?, ?, ?, ?)",
+                            [p_name, t_name, a_date, n_date, nts]
+                        )
+                    else: # Existing row updated
+                        client.execute(
+                            "UPDATE treatments SET plant_name=?, treatment=?, applied_date=?, next_due_date=?, notes=? WHERE id=?",
+                            [p_name, t_name, a_date, n_date, nts, int(row_id)]
+                        )
                 
-                if pd.isna(row_id): # New row added via UI
-                    client.execute(
-                        "INSERT INTO treatments (plant_name, treatment, applied_date, next_due_date, notes) VALUES (?, ?, ?, ?, ?)",
-                        [p_name, t_name, a_date, n_date, nts]
-                    )
-                else: # Existing row updated
-                    client.execute(
-                        "UPDATE treatments SET plant_name=?, treatment=?, applied_date=?, next_due_date=?, notes=? WHERE id=?",
-                        [p_name, t_name, a_date, n_date, nts, int(row_id)]
-                    )
-            
-            st.success("Log changes saved to database!")
-            st.rerun()
+                st.success("Log changes saved to database!")
+                st.rerun()
     else:
         st.info("No treatments logged yet.")
 
