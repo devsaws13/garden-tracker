@@ -125,13 +125,13 @@ tab1, tab2 = st.tabs(["📅 Upcoming Schedule", "⚙️ Edit Settings & Options"
 with tab1:
     st.subheader("Schedule & History")
     
-    # 1. Fetch data strictly from the treatments table (No SQL JOIN needed)
+    # Fetch data strictly from the treatments table
     result = client.execute("SELECT id, plant_name, treatment, applied_date, next_due_date, notes FROM treatments ORDER BY next_due_date ASC")
     
     if result.rows:
         df = pd.DataFrame(result.rows, columns=["ID", "Plant", "Treatment", "Applied On", "Next Due", "Notes"])
         
-        # 2. Force the emojis into the Plant column using our Python dictionary map
+        # MAP EMOJIS: Convert "Mogra" to "🌸 Mogra" for display
         df['Plant'] = df['Plant'].map(plant_display_map).fillna(df['Plant'])
         
         # Convert date strings to actual date objects
@@ -143,7 +143,6 @@ with tab1:
         
         def highlight_dates(row):
             due_date = row['Next Due']
-            
             if pd.isna(due_date):
                 return [''] * len(row)
             if due_date < today:
@@ -153,26 +152,25 @@ with tab1:
             else:
                 return [''] * len(row)
         
-        # Apply the styles to a separate variable
         styled_df = df.style.apply(highlight_dates, axis=1)
 
-        # Toggle switch for Edit Mode
         edit_mode = st.toggle("✏️ Enable Edit Mode")
 
         if not edit_mode:
-            # VIEW MODE: Uses st.dataframe for perfect color rendering
+            # VIEW MODE
             st.dataframe(
                 styled_df,
-                column_config={"ID": None}, # Hides the ID column securely
+                column_config={"ID": None},
                 use_container_width=True,
                 hide_index=True
             )
         else:
-            # EDIT MODE: Uses st.data_editor without colors to prevent the flashing bug
+            # EDIT MODE
             edited_df = st.data_editor(
                 df, 
                 column_config={
                     "ID": None, 
+                    # Use the emoji list for the editor dropdown to prevent blank columns
                     "Plant": st.column_config.SelectboxColumn(options=db_plants_display),
                     "Treatment": st.column_config.SelectboxColumn(options=db_treatments)
                 },
@@ -186,28 +184,28 @@ with tab1:
                 original_ids = set(df['ID'].dropna().tolist())
                 current_ids = set(edited_df['ID'].dropna().tolist())
                 
-                # Find and delete rows removed in the editor
                 deleted_ids = original_ids - current_ids
                 for del_id in deleted_ids:
                     client.execute("DELETE FROM treatments WHERE id = ?", [del_id])
                     
-                # Update existing rows or insert newly typed rows
                 for _, row in edited_df.iterrows():
                     row_id = row['ID']
                     p_display = row['Plant']
-                    # Strip emoji before saving back to the DB to keep data clean
+                    
+                    # Ensure we strip the emoji back to the raw name before saving to the DB
                     p_name = plant_value_map.get(p_display, p_display) 
+                    
                     t_name = row['Treatment']
                     a_date = str(row['Applied On'])
                     n_date = str(row['Next Due'])
                     nts = str(row['Notes']) if pd.notna(row['Notes']) else ""
                     
-                    if pd.isna(row_id): # New row added via UI
+                    if pd.isna(row_id): # New row
                         client.execute(
                             "INSERT INTO treatments (plant_name, treatment, applied_date, next_due_date, notes) VALUES (?, ?, ?, ?, ?)",
                             [p_name, t_name, a_date, n_date, nts]
                         )
-                    else: # Existing row updated
+                    else: # Update existing
                         client.execute(
                             "UPDATE treatments SET plant_name=?, treatment=?, applied_date=?, next_due_date=?, notes=? WHERE id=?",
                             [p_name, t_name, a_date, n_date, nts, int(row_id)]
@@ -217,7 +215,7 @@ with tab1:
                 st.rerun()
     else:
         st.info("No treatments logged yet.")
-        
+
 with tab2:
     st.subheader("Manage Dropdown Options")
     colA, colB = st.columns(2)
